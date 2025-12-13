@@ -1,3 +1,4 @@
+# --- V0 ---
 import os
 import time
 import threading
@@ -157,3 +158,4 @@ if __name__ == '__main__':
     if not os.getenv('LLMOST_API_KEY'):
         print("ПРЕДУПРЕЖДЕНИЕ: Переменная окружения LLMOST_API_KEY не установлена.")
     app.run(host='0.0.0.0', port=3000, debug=True)
+
