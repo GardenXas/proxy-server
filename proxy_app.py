@@ -43,9 +43,10 @@ def transform_to_gemini_format(openai_response_json):
 
 def handle_openai_compatible(client_data, user_api_key, provider_name, base_url, env_key, extra_headers={}):
     """Универсальный обработчик для OpenAI-совместимых API (OpenRouter, LLMost)."""
-    api_key = user_api_key or os.getenv(env_key)
+    # --- ИСПРАВЛЕНИЕ: Приоритет ключа от клиента ---
+    api_key = user_api_key if user_api_key else os.getenv(env_key)
     if not api_key:
-        raise ValueError(f"{provider_name} API key is missing (env var: {env_key}).")
+        raise ValueError(f"{provider_name} API key is missing. Not found in client request or on server (env var: {env_key}).")
 
     api_url = f"{base_url}/chat/completions"
     
@@ -80,9 +81,10 @@ def handle_gemini_request(client_data, user_api_key):
         print(f"[Proxy] Gemini Rate limit: waiting for {sleep_time:.2f} seconds...")
         time.sleep(sleep_time)
 
-    api_key = user_api_key or os.getenv('GEMINI_API_KEY')
+    # --- ИСПРАВЛЕНИЕ: Приоритет ключа от клиента ---
+    api_key = user_api_key if user_api_key else os.getenv('GEMINI_API_KEY')
     if not api_key:
-        raise ValueError("Gemini API key is missing.")
+        raise ValueError("Gemini API key is missing. Not found in client request or on server.")
 
     model_name = client_data.pop('modelName', 'gemini-1.5-flash-latest')
     api_url = f"https://generativelanguage.googleapis.com/v1beta/models/{model_name}:generateContent?key={api_key}"
@@ -102,10 +104,11 @@ def proxy_handler():
             if not client_data:
                 return jsonify({"error": {"message": "Invalid JSON body"}}), 400
 
+            # --- ИСПРАВЛЕНИЕ: Надежное извлечение provider ---
             provider = client_data.pop('provider', 'gemini').lower()
             user_api_key = request.headers.get('Authorization', '').replace('Bearer ', '')
             
-            print(f"[Proxy] Received request for provider: {provider}")
+            print(f"[Proxy] Received request for provider: '{provider}'")
 
             if provider == 'llmost':
                 response_data = handle_openai_compatible(
@@ -134,8 +137,6 @@ def proxy_handler():
                 return jsonify(response_data)
 
             else:
-                # Этот блок для прямого подключения к LM Studio, если URL не стандартный
-                # Но пока мы используем OpenRouter/LLMost, он не будет задействован
                 return jsonify({"error": {"message": f"Unsupported provider: {provider}"}}), 400
 
         except requests.exceptions.HTTPError as e:
