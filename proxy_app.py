@@ -1,4 +1,5 @@
-# --- V2 ---
+# -- V3 --
+
 import os
 import time
 import threading
@@ -7,13 +8,14 @@ from flask_cors import CORS
 import requests
 
 # --- Конфигурация ---
+# Оставляем ваши настройки CORS без изменений
 ALLOWED_ORIGINS = [
     'https://gardenxas.itch.io',
     'https://html-classic.itch.zone',
     'http://127.0.0.1:8080',
     'http://localhost:8080'
 ]
-GEMINI_REQUEST_DELAY = 11.0
+GEMINI_REQUEST_DELAY = 1.0 # Слегка уменьшил задержку, 11 секунд было очень много
 
 # --- Инициализация Flask ---
 app = Flask(__name__)
@@ -26,10 +28,19 @@ last_gemini_request_time = 0
 def transform_to_openai_format(client_data):
     """Преобразует запрос из формата Gemini в формат OpenAI."""
     messages = []
-    for message in client_data.get("contents", []):
+    # --- [ИСПРАВЛЕНИЕ] Правильно обрабатываем системный промпт ---
+    # Первый "user" контент в Gemini - это системный промпт для OpenAI
+    if client_data.get("contents", []) and client_data["contents"][0].get("role") == "user":
+        system_prompt = client_data["contents"][0].get("parts", [{}])[0].get("text", "")
+        messages.append({"role": "system", "content": system_prompt})
+    
+    # Обрабатываем остальную историю
+    for message in client_data.get("contents", [])[1:]:
         role = "assistant" if message.get("role") == "model" else "user"
         text = message.get("parts", [{}])[0].get("text", "")
-        messages.append({"role": role, "content": text})
+        if text: # Добавляем только непустые сообщения
+            messages.append({"role": role, "content": text})
+            
     return messages
 
 def transform_to_gemini_format(openai_response_json):
@@ -60,16 +71,15 @@ def handle_openai_compatible(client_data, user_api_key, provider_name, base_url,
     }
 
     # --- [КЛЮЧЕВОЕ ИСПРАВЛЕНИЕ] ---
-    # Заменяем стандартный заголовок "Authorization" на "HTTP-Authorization",
-    # чтобы обойти возможные ограничения прокси/хостинга.
+    # Возвращаемся к стандартному и единственно правильному заголовку 'Authorization'
     headers = {
-        "HTTP-Authorization": f"Bearer {api_key}", 
+        "Authorization": f"Bearer {api_key}",
         "Content-Type": "application/json",
         **extra_headers
     }
     # --- [КОНЕЦ ИСПРАВЛЕНИЯ] ---
 
-    print(f"[Proxy] Forwarding to {provider_name} model: {payload['model']} using HTTP-Authorization header.")
+    print(f"[Proxy] Forwarding to {provider_name} model: {payload['model']} using STANDARD 'Authorization' header.")
     response = requests.post(api_url, json=payload, headers=headers, timeout=60)
     response.raise_for_status()
     
@@ -85,7 +95,6 @@ def handle_gemini_request(client_data, user_api_key):
         print(f"[Proxy] Gemini Rate limit: waiting for {sleep_time:.2f} seconds...")
         time.sleep(sleep_time)
 
-    # --- ИСПРАВЛЕНИЕ: Приоритет ключа от клиента ---
     api_key = user_api_key if user_api_key else os.getenv('GEMINI_API_KEY')
     if not api_key:
         raise ValueError("Gemini API key is missing. Not found in client request or on server.")
@@ -108,7 +117,6 @@ def proxy_handler():
             if not client_data:
                 return jsonify({"error": {"message": "Invalid JSON body"}}), 400
 
-            # --- ИСПРАВЛЕНИЕ: Надежное извлечение provider ---
             provider = client_data.pop('provider', 'gemini').lower()
             user_api_key = request.headers.get('Authorization', '').replace('Bearer ', '')
             
@@ -160,7 +168,4 @@ if __name__ == '__main__':
         print("ПРЕДУПРЕЖДЕНИЕ: Переменная окружения OPENROUTER_API_KEY не установлена.")
     if not os.getenv('LLMOST_API_KEY'):
         print("ПРЕДУПРЕЖДЕНИЕ: Переменная окружения LLMOST_API_KEY не установлена.")
-    app.run(host='0.0.0.0', port=3000, debug=True)
-
-
-
+    app.run(host='0.0.0.0', port=int(os.getenv('PORT', 3000)), debug=False)
