@@ -26,20 +26,35 @@ api_lock = threading.Lock()
 last_gemini_request_time = 0
 
 def transform_to_openai_format(client_data):
-    """Преобразует запрос из формата Gemini в формат OpenAI."""
+    """Преобразует запрос из формата Gemini в формат OpenAI, обеспечивая наличие user message."""
     messages = []
-    # --- [ИСПРАВЛЕНИЕ] Правильно обрабатываем системный промпт ---
-    # Первый "user" контент в Gemini - это системный промпт для OpenAI
-    if client_data.get("contents", []) and client_data["contents"][0].get("role") == "user":
-        system_prompt = client_data["contents"][0].get("parts", [{}])[0].get("text", "")
-        messages.append({"role": "system", "content": system_prompt})
+    gemini_contents = client_data.get("contents", [])
     
-    # Обрабатываем остальную историю
-    for message in client_data.get("contents", [])[1:]:
-        role = "assistant" if message.get("role") == "model" else "user"
-        text = message.get("parts", [{}])[0].get("text", "")
-        if text: # Добавляем только непустые сообщения
-            messages.append({"role": role, "content": text})
+    if not gemini_contents:
+        return []
+
+    # Первое сообщение - это всегда системный промпт
+    system_prompt = gemini_contents[0].get("parts", [{}])[0].get("text", "")
+    messages.append({"role": "system", "content": system_prompt})
+    
+    # --- [КЛЮЧЕВОЕ ИСПРАВЛЕНИЕ] ---
+    # Обрабатываем остальную историю чата
+    chat_history = gemini_contents[1:]
+    
+    # Если история чата пуста (это самый первый запрос в игре),
+    # нам нужно создать фиктивное "user" сообщение, чтобы API не ругался.
+    # Это особенно важно для OpenRouter.
+    if not chat_history:
+        messages.append({"role": "user", "content": "Начинай."}) # Простое стартовое сообщение
+    else:
+        # Если история есть, преобразуем ее как обычно
+        for message in chat_history:
+            role = "assistant" if message.get("role") == "model" else "user"
+            text = message.get("parts", [{}])[0].get("text", "")
+            if text:
+                messages.append({"role": role, "content": text})
+
+    # --- [КОНЕЦ ИСПРАВЛЕНИЯ] ---
             
     return messages
 
@@ -169,3 +184,4 @@ if __name__ == '__main__':
     if not os.getenv('LLMOST_API_KEY'):
         print("ПРЕДУПРЕЖДЕНИЕ: Переменная окружения LLMOST_API_KEY не установлена.")
     app.run(host='0.0.0.0', port=int(os.getenv('PORT', 3000)), debug=False)
+
