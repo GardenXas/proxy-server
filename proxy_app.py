@@ -44,7 +44,6 @@ def transform_to_gemini_format(openai_response_json):
 
 def handle_openai_compatible(client_data, user_api_key, provider_name, base_url, env_key, extra_headers={}):
     """Универсальный обработчик для OpenAI-совместимых API (OpenRouter, LLMost)."""
-    # --- ИСПРАВЛЕНИЕ: Приоритет ключа от клиента ---
     api_key = user_api_key if user_api_key else os.getenv(env_key)
     if not api_key:
         raise ValueError(f"{provider_name} API key is missing. Not found in client request or on server (env var: {env_key}).")
@@ -60,13 +59,17 @@ def handle_openai_compatible(client_data, user_api_key, provider_name, base_url,
         "max_tokens": client_data.get("generationConfig", {}).get("maxOutputTokens", 4096)
     }
 
+    # --- [КЛЮЧЕВОЕ ИСПРАВЛЕНИЕ] ---
+    # Заменяем стандартный заголовок "Authorization" на "HTTP-Authorization",
+    # чтобы обойти возможные ограничения прокси/хостинга.
     headers = {
-        "Authorization": f"Bearer {api_key}",
+        "HTTP-Authorization": f"Bearer {api_key}", 
         "Content-Type": "application/json",
         **extra_headers
     }
+    # --- [КОНЕЦ ИСПРАВЛЕНИЯ] ---
 
-    print(f"[Proxy] Forwarding to {provider_name} model: {payload['model']}")
+    print(f"[Proxy] Forwarding to {provider_name} model: {payload['model']} using HTTP-Authorization header.")
     response = requests.post(api_url, json=payload, headers=headers, timeout=60)
     response.raise_for_status()
     
@@ -158,4 +161,5 @@ if __name__ == '__main__':
     if not os.getenv('LLMOST_API_KEY'):
         print("ПРЕДУПРЕЖДЕНИЕ: Переменная окружения LLMOST_API_KEY не установлена.")
     app.run(host='0.0.0.0', port=3000, debug=True)
+
 
