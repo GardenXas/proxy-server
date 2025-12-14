@@ -1,4 +1,4 @@
-# -- V4 --
+# -- V5 --
 
 import os
 import time
@@ -26,33 +26,44 @@ api_lock = threading.Lock()
 last_gemini_request_time = 0
 
 def transform_to_openai_format(client_data):
-    """Преобразует запрос из формата Gemini в формат OpenAI, обеспечивая наличие user message."""
     messages = []
     gemini_contents = client_data.get("contents", [])
     
     if not gemini_contents:
         return []
 
-    # Первое сообщение - это всегда системный промпт
-    system_prompt = gemini_contents[0].get("parts", [{}])[0].get("text", "")
-    messages.append({"role": "system", "content": system_prompt})
-    
     # --- [КЛЮЧЕВОЕ ИСПРАВЛЕНИЕ] ---
-    # Обрабатываем остальную историю чата
+    # Первый элемент в `contents` - это всегда большой системный промпт.
+    # Он НЕ является частью диалога, а задает правила игры для модели.
+    system_prompt = gemini_contents[0].get("parts", [{}])[0].get("text", "")
+    if system_prompt:
+        messages.append({"role": "system", "content": system_prompt})
+
+    # Остальные элементы - это реальная история диалога.
     chat_history = gemini_contents[1:]
-    
-    # Если история чата пуста (это самый первый запрос в игре),
-    # нам нужно создать фиктивное "user" сообщение, чтобы API не ругался.
-    # Это особенно важно для OpenRouter.
-    if not chat_history:
-        messages.append({"role": "user", "content": "Начинай."}) # Простое стартовое сообщение
-    else:
-        # Если история есть, преобразуем ее как обычно
-        for message in chat_history:
-            role = "assistant" if message.get("role") == "model" else "user"
-            text = message.get("parts", [{}])[0].get("text", "")
-            if text:
-                messages.append({"role": role, "content": text})
+
+    # Преобразуем историю, пропуская фиктивное сообщение "model" от клиента.
+    for message in chat_history:
+        role = "assistant" if message.get("role") == "model" else "user"
+        text = message.get("parts", [{}])[0].get("text", "")
+
+        # ВАЖНО: Пропускаем стартовое "подтверждение" от модели, оно не нужно для OpenAI API.
+        if role == "assistant" and text == "Understood. I will act as the Game Master in Russian. Let's begin the adventure.":
+            continue
+        
+        # Добавляем в историю только непустые сообщения.
+        if text:
+            messages.append({"role": role, "content": text})
+
+    # ПРОВЕРКА: Если после системного промпта первое сообщение от ассистента, это ошибка.
+    # Такое может случиться, если история была пустой.
+    if len(messages) > 1 and messages[1]["role"] == "assistant":
+         # Вставляем фиктивное сообщение от пользователя, чтобы исправить порядок.
+         messages.insert(1, {"role": "user", "content": "Начинай приключение."})
+         
+    # ФИНАЛЬНАЯ ПРОВЕРКА: Если вообще нет сообщений от пользователя - добавляем одно.
+    if not any(msg["role"] == "user" for msg in messages):
+        messages.append({"role": "user", "content": "Начинай."})
 
     # --- [КОНЕЦ ИСПРАВЛЕНИЯ] ---
             
@@ -184,5 +195,6 @@ if __name__ == '__main__':
     if not os.getenv('LLMOST_API_KEY'):
         print("ПРЕДУПРЕЖДЕНИЕ: Переменная окружения LLMOST_API_KEY не установлена.")
     app.run(host='0.0.0.0', port=int(os.getenv('PORT', 3000)), debug=False)
+
 
 
